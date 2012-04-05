@@ -33,3 +33,7 @@ $response = Httpful::get($uri)->send();
 echo 'The Dead Weather has ' . count($response->body->result->album) . " albums.\n";
 
 ```
+
+Notice that it is ``Httpful::get()`` and not ``Request::get()`` to avoid collisions between Laravel and Httpful.
+
+More infomation about how to use Httpful [can be found here](http://phphttpclient.com).
