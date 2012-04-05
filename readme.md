@@ -9,13 +9,13 @@ This only bundles Httpful for usage with Laravel, all credit for Httpful goes to
 
 The current version of the bundle uses commit f0f53baa5e of Httpful.
 
-## Installation
+### Installation
 
 ```bash
 php artisan bundle:install httpful
 ```
 
-## Bundle Registration
+### Bundle Registration
 
 Add the following to your **application/bundles.php** file:
 
@@ -25,7 +25,7 @@ Add the following to your **application/bundles.php** file:
 ),
 ```
 
-## Example Usage
+### Example Usage
 
 ```
 $uri = "https://www.googleapis.com/freebase/v1/mqlread?query=%7B%22type%22:%22/music/artist%22%2C%22name%22:%22The%20Dead%20Weather%22%2C%22album%22:%5B%5D%7D";
