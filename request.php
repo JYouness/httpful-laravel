@@ -104,7 +104,7 @@ class Request
      * @param string|null $attr Name of attribute (e.g. mime, headers)
      *    if null just return the whole template object;
      */
-    public function d($attr)
+    public static function d($attr)
     {
         return isset($attr) ? self::$_template->$attr : self::$_template;
     }
@@ -646,7 +646,7 @@ class Request
      * Note: It does NOT actually send the request
      * @return Request $this;
      */
-    private function _curlPrep()
+    public function _curlPrep()
     {
         // Check for required stuff
         if (!isset($this->uri))

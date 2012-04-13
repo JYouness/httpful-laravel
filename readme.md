@@ -7,7 +7,7 @@ This only bundles Httpful for usage with Laravel, all credit for Httpful goes to
 - [Httpful on GitHub](http://github.com/nategood/httpful)
 - [Httpful Landing Page](http://phphttpclient.com)
 
-The current version of the bundle uses commit f0f53baa5e of Httpful.
+The current version of the bundle uses commit 50c6314cd5 of Httpful.
 
 ### Installation
 
