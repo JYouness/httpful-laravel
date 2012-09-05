@@ -13,13 +13,14 @@ class Response
     public $body,
            $raw_body,
            $headers,
+           $raw_headers,
            $request,
            $code = 0,
            $content_type,
            $parent_type,
            $charset,
-           $is_mime_vendor_specific,
-           $is_mime_personal;
+           $is_mime_vendor_specific = false,
+           $is_mime_personal = false;
 
     private $parsers;
     /**
@@ -40,15 +41,25 @@ class Response
 
         $this->body         = $this->_parse($body);
     }
-    
+
     /**
-     * @return bool Did we receive a 400 or 500?
+     * Status Code Definitions
+     *
+     * Informational 1xx
+     * Successful    2xx
+     * Redirection   3xx
+     * Client Error  4xx
+     * Server Error  5xx
+     *
+     * http://pretty-rfc.herokuapp.com/RFC2616#status.codes
+     *
+     * @return bool Did we receive a 4xx or 5xx?
      */
     public function hasErrors()
     {
-        return $this->code < 100 || $this->code >= 400;
+        return $this->code >= 400;
     }
-    
+
     /**
      * @return return bool
      */
@@ -79,30 +90,17 @@ class Response
 
         // Decide how to parse the body of the response in the following order
         //  1. If provided, use the mime type specifically set as part of the `Request`
-        //  2. If provided, use the "parent type" of the mime type from the response
-        //  3. Use the content-type provided in the response
-        $parse_with = (empty($this->request->expected_type) && isset($this->parent_type)) ?
-            $this->parent_type :
-            $this->request->expected_type;
-
-        // @todo refactor by breaking these parsers out into own classes and program to an interface
-        switch ($parse_with) {
-            case Mime::JSON:
-                $parsed = json_decode($body, false);
-                if (!$parsed) throw new \Exception("Unable to parse response as JSON");
-                break;
-            case Mime::XML:
-                $parsed = simplexml_load_string($body);
-                if (!$parsed) throw new \Exception("Unable to parse response as XML");
-                break;
-            case Mime::FORM:
-                $parsed = array();
-                parse_str($body, $parsed);
-                break;
-            default:
-                $parsed = $body;
+        //  2. If a MimeHandler is registered for the content type, use it
+        //  3. If provided, use the "parent type" of the mime type from the response
+        //  4. Default to the content-type provided in the response
+        $parse_with = $this->request->expected_type;
+        if (empty($this->request->expected_type)) {
+            $parse_with = Httpful::hasParserRegistered($this->content_type)
+                ? $this->content_type
+                : $this->parent_type;
         }
-        return $parsed;
+
+       return Httpful::get($parse_with)->parse($body);
     }
 
     /**
@@ -113,7 +111,8 @@ class Response
      */
     public function _parseHeaders($headers)
     {
-        $headers = preg_split("/(\r|\n)+/", $headers);
+        $headers = preg_split("/(\r|\n)+/", $headers, -1, \PREG_SPLIT_NO_EMPTY);
+        $parse_headers = array();
         for ($i = 1; $i < count($headers); $i++) {
             list($key, $raw_value) = explode(':', $headers[$i], 2);
             $parse_headers[trim($key)] = trim($raw_value);
@@ -155,9 +154,11 @@ class Response
         }
 
         // Is vendor type? Is personal type?
-        list($type, $sub_type) = explode('/', $this->content_type);
-        $this->is_mime_vendor_specific = substr($sub_type, 0, 4) === 'vnd.';
-        $this->is_mime_personal = substr($sub_type, 0, 4) === 'prs.';
+        if (strpos($this->content_type, '/') !== false) {
+            list($type, $sub_type) = explode('/', $this->content_type);
+            $this->is_mime_vendor_specific = substr($sub_type, 0, 4) === 'vnd.';
+            $this->is_mime_personal = substr($sub_type, 0, 4) === 'prs.';
+        }
 
         // Parent type (e.g. xml for application/vnd.github.message+xml)
         $this->parent_type = $this->content_type;
@@ -165,17 +166,6 @@ class Response
             list($vendor, $this->parent_type) = explode('+', $this->content_type, 2);
             $this->parent_type = Mime::getFullMime($this->parent_type);
         }
-    }
-
-    /**
-     * Does this particular Mime Type have a parser registered
-     * for it?
-     * @return bool
-     */
-    public function _hasParserRegistered()
-    {
-        // TODO once we break the parsers out to into their own class conforming
-        // to an interface.  see switch statement from the _parse method.
     }
 
     /**

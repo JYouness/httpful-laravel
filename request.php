@@ -24,9 +24,12 @@ class Request
     const SERIALIZE_PAYLOAD_ALWAYS  = 1;
     const SERIALIZE_PAYLOAD_SMART   = 2;
 
+    const MAX_REDIRECTS_DEFAULT     = 25;
+
     public $uri,
            $method                  = Http::GET,
            $headers                 = array(),
+           $raw_headers             = '',
            $strict_ssl              = false,
            $content_type,
            $expected_type,
@@ -40,6 +43,7 @@ class Request
            $parse_callback,
            $error_callback,
            $follow_redirects        = false,
+           $max_redirects           = self::MAX_REDIRECTS_DEFAULT,
            $payload_serializers     = array();
 
     // Options
@@ -131,11 +135,12 @@ class Request
      * If the response is a 301 or 302 redirect, automatically
      * send off another request to that location
      * @return Request $this
-     * @param bool $follow follow or not to follow
+     * @param bool|int $follow follow or not to follow or maximal number of redirects
      */
     public function followRedirects($follow = true)
     {
-        $this->follow_redirects = $follow;
+        $this->max_redirects = $follow === true ? self::MAX_REDIRECTS_DEFAULT : max(0, $follow);
+        $this->follow_redirects = (bool) $follow;
         return $this;
     }
 
@@ -167,7 +172,7 @@ class Request
 
         $info = curl_getinfo($this->_ch);
         $response = explode("\r\n\r\n", $result, 2 + $info['redirect_count']);
-        
+
         $body = array_pop($response);
         $headers = array_pop($response);
 
@@ -254,7 +259,7 @@ class Request
     {
         $this->mime($mimeType);
         $this->payload = $payload;
-        // Intentially don't call _serializePayload yet.  Wait until
+        // Iserntentially don't call _serializePayload yet.  Wait until
         // we actually send off the request to convert payload to string.
         // At that time, the `serialized_payload` is set accordingly.
         return $this;
@@ -442,7 +447,7 @@ class Request
         $this->auto_parse = $auto_parse;
         return $this;
     }
-    
+
     /**
      * @see Request::autoParse()
      * @return Request
@@ -451,7 +456,7 @@ class Request
     {
         return $this->autoParse(false);
     }
-    
+
     /**
      * @see Request::autoParse()
      * @return Request
@@ -472,7 +477,7 @@ class Request
         $this->parse_callback = $callback;
         return $this;
     }
-    
+
     /**
      * @see Request::parseResponsesWith()
      * @return Request $this
@@ -565,7 +570,7 @@ class Request
             $method = substr($method, 4);
 
         // Precede upper case letters with dashes, uppercase the first letter of method
-        $header =  substr(ucwords(preg_replace('/([A-Z])/', '-$1', $method)), 1);
+        $header = ucwords(implode('-', preg_split('/([A-Z][^A-Z]*)/', $method, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY)));
         $this->addHeader($header, $args[0]);
         return $this;
     }
@@ -675,25 +680,73 @@ class Request
             curl_setopt($ch, CURLOPT_SSLKEYPASSWD,  $this->client_passphrase);
             // curl_setopt($ch, CURLOPT_SSLCERTPASSWD,  $this->client_cert_passphrase);
         }
-        
+
         if ($this->follow_redirects) {
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_MAXREDIRS, 25);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, $this->max_redirects);
         }
 
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $this->strict_ssl);
-
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
-        $headers = array("Content-Type: {$this->content_type}");
+        $headers = array();
 
-        $headers[] = !empty($this->expected_type) ?
-            "Accept: {$this->expected_type}, text/plain" :
-            "Accept: */*";
+        if (!isset($this->headers['User-Agent'])) {
+            $user_agent = 'User-Agent: Httpful/' . Httpful::VERSION . ' (cURL/';
+            $curl = \curl_version();
+
+            if (isset($curl['version'])) {
+                $user_agent .= $curl['version'];
+            } else {
+                $user_agent .= '?.?.?';
+            }
+
+            $user_agent .= ' PHP/'. PHP_VERSION . ' (' . PHP_OS . ')';
+
+            if (isset($_SERVER['SERVER_SOFTWARE'])) {
+                $user_agent .= ' ' . \preg_replace('~PHP/[\d\.]+~U', '',
+                    $_SERVER['SERVER_SOFTWARE']);
+            } else {
+                if (isset($_SERVER['TERM_PROGRAM'])) {
+                    $user_agent .= " {$_SERVER['TERM_PROGRAM']}";
+                }
+
+                if (isset($_SERVER['TERM_PROGRAM_VERSION'])) {
+                    $user_agent .= "/{$_SERVER['TERM_PROGRAM_VERSION']}";
+                }
+            }
+
+            if (isset($_SERVER['HTTP_USER_AGENT'])) {
+                $user_agent .= " {$_SERVER['HTTP_USER_AGENT']}";
+            }
+
+            $user_agent .= ')';
+            $headers[] = $user_agent;
+        }
+
+        $headers[] = "Content-Type: {$this->content_type}";
+
+        // http://pretty-rfc.herokuapp.com/RFC2616#header.accept
+        $accept = 'Accept: */*; q=0.5, text/plain; q=0.8, text/html;level=3;';
+
+        if (!empty($this->expected_type)) {
+            $accept .= "q=0.9, {$this->expected_type}";
+        }
+
+        $headers[] = $accept;
 
         foreach ($this->headers as $header => $value) {
             $headers[] = "$header: $value";
         }
+
+        $url = \parse_url($this->uri);
+        $path = (isset($url['path']) ? $url['path'] : '/').(isset($url['query']) ? '?'.$url['query'] : '');
+        $this->raw_headers = "{$this->method} $path HTTP/1.1\r\n";
+        $host = (isset($url['host']) ? $url['host'] : 'localhost').(isset($url['port']) ? ':'.$url['port'] : '');
+        $this->raw_headers .= "Host: $host\r\n";
+        $this->raw_headers .= \implode("\r\n", $headers);
+        $this->raw_headers .= "\r\n";
+
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         if (isset($this->payload)) {
@@ -732,7 +785,7 @@ class Request
     }
 
     /**
-     * Turn payload from structure data into
+     * Turn payload from structured data into
      * a string based on the current Mime type.
      * This uses the auto_serialize option to determine
      * it's course of action.  See serialize method for more.
@@ -755,90 +808,15 @@ class Request
         if ($this->serialize_payload_method === self::SERIALIZE_PAYLOAD_SMART && is_scalar($payload))
             return $payload;
 
+        // Use a custom serializer if one is registered for this mime type
         if (isset($this->payload_serializers['*']) || isset($this->payload_serializers[$this->content_type])) {
             $key = isset($this->payload_serializers[$this->content_type]) ? $this->content_type : '*';
             return call_user_func($this->payload_serializers[$key], $payload);
         }
 
-        switch($this->content_type) {
-            case Mime::JSON:
-                return json_encode($payload);
-            case Mime::FORM:
-                return http_build_query($payload);
-            case Mime::XML:
-                try {
-                   list($_, $dom) = $this->_future_serializeAsXml($payload);
-                   return $dom->saveXml();
-                } catch (Exception $e) {}
-            default:
-                return (string) $payload;
-        }
+        return Httpful::get($this->content_type)->serialize($payload);
     }
 
-    /**
-     * @author Zack Douglas <zack@zackerydouglas.info>
-     */
-    private function _future_serializeAsXml($value, $node = null, $dom = null)
-    {
-        if (!$dom) {
-            $dom = new \DOMDocument;
-        }
-        if (!$node) {
-            if (!is_object($value)) {
-                $node = $dom->createElement('response');
-                $dom->appendChild($node);
-            } else {
-                $node = $dom;
-            }
-        }
-        if (is_object($value)) {
-            $objNode = $dom->createElement(get_class($value));
-            $node->appendChild($objNode);
-            $this->_future_serializeObjectAsXml($value, $objNode, $dom);
-        } else if (is_array($value)) {
-            $arrNode = $dom->createElement('array');
-            $node->appendChild($arrNode);
-            $this->_future_serializeArrayAsXml($value, $arrNode, $dom);
-        } else if (is_bool($value)) {
-            $node->appendChild($dom->createTextNode($value?'TRUE':'FALSE'));
-        } else {
-            $node->appendChild($dom->createTextNode($value));
-        }
-        return array($node, $dom);
-    }
-    /**
-     * @author Zack Douglas <zack@zackerydouglas.info>
-     */
-    private function _future_serializeArrayAsXml($value, &$parent, &$dom)
-    {
-        foreach ($value as $k => &$v) {
-            $n = $k;
-            if (is_numeric($k)) {
-                $n = "child-{$n}";
-            }
-            $el = $dom->createElement($n);
-            $parent->appendChild($el);
-            $this->_future_serializeAsXml($v, $el, $dom);
-        }
-        return array($parent, $dom);
-    }
-    /**
-     * @author Zack Douglas <zack@zackerydouglas.info>
-     */
-    private function _future_serializeObjectAsXml($value, &$parent, &$dom)
-    {
-        $refl = new \ReflectionObject($value);
-        foreach ($refl->getProperties() as $pr) {
-            if (!$pr->isPrivate()) {
-                $el = $dom->createElement($pr->getName());
-                $parent->appendChild($el);
-                $this->_future_serializeAsXml($pr->getValue($value), $el, $dom);
-            }
-        }
-        return array($parent, $dom);
-    }
-
-    // Http Method Sugar
     /**
      * HTTP Method Get
      * @return Request
@@ -849,6 +827,15 @@ class Request
     {
         return self::init(Http::GET)->uri($uri)->mime($mime);
     }
+
+
+    /**
+     * Like Request:::get, except that it sends off the request as well
+     * returning a response
+     * @return Response
+     * @param string $uri optional uri to use
+     * @param string $mime expected
+     */
     public static function getQuick($uri, $mime = null)
     {
         return self::get($uri, $mime)->send();
