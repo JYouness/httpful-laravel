@@ -7,12 +7,12 @@ Autoloader::map(array(
 	'Httpful\Mime'      => Bundle::path('httpful').'mime.php',
 	'Httpful\Request'   => Bundle::path('httpful').'request.php',
 	'Httpful\Response'  => Bundle::path('httpful').'response.php',
-	'Httpful\Handlers\CsvHandler'           => Bundle::path('httpful').'Handlers/csvhandler.php',
-	'Httpful\Handlers\FormHandler'          => Bundle::path('httpful').'Handlers/formhandler.php',
-	'Httpful\Handlers\JsonHandler'          => Bundle::path('httpful').'Handlers/jsonhandler.php',
-	'Httpful\Handlers\MimeHandlerAdapter'   => Bundle::path('httpful').'Handlers/mimehandleradapter.php',
-	'Httpful\Handlers\XHtmlHandler'         => Bundle::path('httpful').'Handlers/xhtmlhandler.php',
-	'Httpful\Handlers\XmlHandler'           => Bundle::path('httpful').'Handlers/xmlhandler.php',
+	'Httpful\Handlers\CsvHandler'           => Bundle::path('httpful').'Handlers/CsvHandler.php',
+	'Httpful\Handlers\FormHandler'          => Bundle::path('httpful').'Handlers/FormHandler.php',
+	'Httpful\Handlers\JsonHandler'          => Bundle::path('httpful').'Handlers/JsonHandler.php',
+	'Httpful\Handlers\MimeHandlerAdapter'   => Bundle::path('httpful').'Handlers/MimeHandlerAdapter.php',
+	'Httpful\Handlers\XHtmlHandler'         => Bundle::path('httpful').'Handlers/XhtmlHandler.php',
+	'Httpful\Handlers\XmlHandler'           => Bundle::path('httpful').'Handlers/XmlHandler.php',
 ));
 
 $handlers = array(
