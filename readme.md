@@ -7,7 +7,9 @@ This only bundles Httpful for usage with Laravel, all credit for Httpful goes to
 - [Httpful on GitHub](http://github.com/nategood/httpful)
 - [Httpful Landing Page](http://phphttpclient.com)
 
-The current version of the bundle uses v0.1.5 of Httpful.
+The current version of the bundle uses v0.1.7 of Httpful.
+
+Laravel 4 users can use the [composer package](http://phphttpclient.com/#install) for Httpful. 
 
 ### Installation
 

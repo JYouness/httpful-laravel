@@ -2,6 +2,8 @@
 
 namespace Httpful;
 
+use Httpful\Exception\ConnectionErrorException;
+
 /**
  * Clean, simple class for sending HTTP requests
  * in PHP.
@@ -116,6 +118,14 @@ class Request
     // Accessors
 
     /**
+     * @return bool does the request have a timeout?
+     */
+    public function hasTimeout()
+    {
+        return isset($this->timeout);
+    }
+
+    /**
      * @return bool has the internal curl request been initialized?
      */
     public function hasBeenInitialized()
@@ -129,6 +139,25 @@ class Request
     public function hasBasicAuth()
     {
         return isset($this->password) && isset($this->username);
+    }
+
+    /**
+     * @return bool Is this request setup for digest auth?
+     */
+    public function hasDigestAuth()
+    {
+        return isset($this->password) && isset($this->username) && $this->additional_curl_opts['CURLOPT_HTTPAUTH'] = CURLAUTH_DIGEST;
+    }    
+
+    /**
+     * Specify a HTTP timeout
+     * @return Request $this
+     * @param |int $timeout seconds to timeout the HTTP call
+     */
+    public function timeout($timeout)
+    {
+        $this->timeout = $timeout;
+        return $this;
     }
 
     /**
@@ -156,7 +185,7 @@ class Request
     /**
      * Actually send off the request, and parse the response
      * @return string|associative array of parsed results
-     * @throws \Exception when unable to parse or communicate w server
+     * @throws ConnectionErrorException when unable to parse or communicate w server
      */
     public function send()
     {
@@ -167,7 +196,7 @@ class Request
 
         if ($result === false) {
             $this->_error(curl_error($this->_ch));
-            throw new \Exception('Unable to connect.');
+            throw new ConnectionErrorException('Unable to connect.');
         }
 
         $info = curl_getinfo($this->_ch);
@@ -218,6 +247,24 @@ class Request
     {
         return $this->basicAuth($username, $password);
     }
+
+    /**
+     * User Digest Auth.
+     * @return Request this
+     * @param string $username
+     * @param string $password
+     */
+    public function digestAuth($username, $password)
+    {
+        $this->addOnCurlOption(CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+        return $this->basicAuth($username, $password);
+    }
+
+    // @alias of digestAuth
+    public function authenticateWithDigest($username, $password)
+    {
+        return $this->digestAuth($username, $password);
+    } 
 
     /**
      * @return is this request setup for client side cert?
@@ -378,14 +425,14 @@ class Request
      * @return Request $this
      * @param int $mode
      */
-    public function alwaysSerializePayload($mode = self::SERIALIZE_PAYLOAD_ALWAYS)
+    public function serializePayload($mode)
     {
         $this->serialize_payload_method = $mode;
         return $this;
     }
 
     /**
-     * @see Request::alwaysSerializePayload()
+     * @see Request::serializePayload()
      * @return Request
      */
     public function neverSerializePayload()
@@ -395,12 +442,21 @@ class Request
 
     /**
      * This method is the default behavior
-     * @see Request::alwaysSerializePayload()
+     * @see Request::serializePayload()
      * @return Request
      */
     public function smartSerializePayload()
     {
         return $this->serializePayload(self::SERIALIZE_PAYLOAD_SMART);
+    }
+
+    /**
+     * @see Request::serializePayload()
+     * @return Request
+     */
+    public function alwaysSerializePayload()
+    {
+        return $this->serializePayload(self::SERIALIZE_PAYLOAD_ALWAYS);
     }
 
     /**
@@ -620,6 +676,7 @@ class Request
     private function _error($error)
     {
         // Default actions write to error log
+        // TODO add in support for various Loggers
         error_log($error);
     }
 
@@ -681,6 +738,10 @@ class Request
             // curl_setopt($ch, CURLOPT_SSLCERTPASSWD,  $this->client_cert_passphrase);
         }
 
+        if ($this->hasTimeout()) {
+            curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
+        }
+        
         if ($this->follow_redirects) {
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, $this->max_redirects);
@@ -690,38 +751,12 @@ class Request
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
         $headers = array();
+        // https://github.com/nategood/httpful/issues/37
+        // Except header removes any HTTP 1.1 Continue from response headers
+        $headers[] = 'Expect:';
 
         if (!isset($this->headers['User-Agent'])) {
-            $user_agent = 'User-Agent: Httpful/' . Httpful::VERSION . ' (cURL/';
-            $curl = \curl_version();
-
-            if (isset($curl['version'])) {
-                $user_agent .= $curl['version'];
-            } else {
-                $user_agent .= '?.?.?';
-            }
-
-            $user_agent .= ' PHP/'. PHP_VERSION . ' (' . PHP_OS . ')';
-
-            if (isset($_SERVER['SERVER_SOFTWARE'])) {
-                $user_agent .= ' ' . \preg_replace('~PHP/[\d\.]+~U', '',
-                    $_SERVER['SERVER_SOFTWARE']);
-            } else {
-                if (isset($_SERVER['TERM_PROGRAM'])) {
-                    $user_agent .= " {$_SERVER['TERM_PROGRAM']}";
-                }
-
-                if (isset($_SERVER['TERM_PROGRAM_VERSION'])) {
-                    $user_agent .= "/{$_SERVER['TERM_PROGRAM_VERSION']}";
-                }
-            }
-
-            if (isset($_SERVER['HTTP_USER_AGENT'])) {
-                $user_agent .= " {$_SERVER['HTTP_USER_AGENT']}";
-            }
-
-            $user_agent .= ')';
-            $headers[] = $user_agent;
+            $headers[] = $this->buildUserAgent();
         }
 
         $headers[] = "Content-Type: {$this->content_type}";
@@ -769,6 +804,40 @@ class Request
         $this->_ch = $ch;
 
         return $this;
+    }
+
+    public function buildUserAgent() {
+        $user_agent = 'User-Agent: Httpful/' . Httpful::VERSION . ' (cURL/';
+        $curl = \curl_version();
+
+        if (isset($curl['version'])) {
+            $user_agent .= $curl['version'];
+        } else {
+            $user_agent .= '?.?.?';
+        }
+
+        $user_agent .= ' PHP/'. PHP_VERSION . ' (' . PHP_OS . ')';
+
+        if (isset($_SERVER['SERVER_SOFTWARE'])) {
+            $user_agent .= ' ' . \preg_replace('~PHP/[\d\.]+~U', '',
+                $_SERVER['SERVER_SOFTWARE']);
+        } else {
+            if (isset($_SERVER['TERM_PROGRAM'])) {
+                $user_agent .= " {$_SERVER['TERM_PROGRAM']}";
+            }
+
+            if (isset($_SERVER['TERM_PROGRAM_VERSION'])) {
+                $user_agent .= "/{$_SERVER['TERM_PROGRAM_VERSION']}";
+            }
+        }
+
+        if (isset($_SERVER['HTTP_USER_AGENT'])) {
+            $user_agent .= " {$_SERVER['HTTP_USER_AGENT']}";
+        }
+
+        $user_agent .= ')';
+
+        return $user_agent;
     }
 
     /**
